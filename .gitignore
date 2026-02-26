@@ -11,3 +11,4 @@ venv/
 .idea/
 .vscode/
 .claude/
+.pytest_cache/
