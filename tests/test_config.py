@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 
 
@@ -7,11 +10,20 @@ def test_default_settings():
     assert settings.listen_host == "0.0.0.0"
     assert settings.listen_port == 8080
     assert settings.log_level == "info"
+    assert settings.api_token is None
 
 
 def test_custom_settings(monkeypatch):
     monkeypatch.setenv("REFRESH_INTERVAL_HOURS", "12")
     monkeypatch.setenv("LISTEN_PORT", "9090")
+    monkeypatch.setenv("API_TOKEN", "secret123")
     settings = Settings()
     assert settings.refresh_interval_hours == 12
     assert settings.listen_port == 9090
+    assert settings.api_token == "secret123"
+
+
+def test_invalid_log_level(monkeypatch):
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    with pytest.raises(ValidationError):
+        Settings()

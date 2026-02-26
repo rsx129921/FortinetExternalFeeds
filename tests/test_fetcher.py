@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.fetcher import discover_download_url, fetch_service_tags
+from app.fetcher import discover_download_url, fetch_service_tags, _validate_download_url
 
 
 FAKE_DOWNLOAD_PAGE = """
@@ -37,6 +37,7 @@ async def test_discover_download_url():
     mock_response = AsyncMock()
     mock_response.status_code = 200
     mock_response.text = FAKE_DOWNLOAD_PAGE
+    mock_response.content = FAKE_DOWNLOAD_PAGE.encode()
     mock_response.raise_for_status = lambda: None
 
     with patch("app.fetcher.httpx.AsyncClient") as mock_client_cls:
@@ -55,6 +56,7 @@ async def test_discover_download_url():
 async def test_fetch_service_tags():
     mock_response = AsyncMock()
     mock_response.status_code = 200
+    mock_response.content = b'{"changeNumber": 200}'
     mock_response.json = lambda: FAKE_SERVICE_TAGS
     mock_response.raise_for_status = lambda: None
 
@@ -65,6 +67,21 @@ async def test_fetch_service_tags():
         mock_client.get = AsyncMock(return_value=mock_response)
         mock_client_cls.return_value = mock_client
 
-        data = await fetch_service_tags("https://example.com/fake.json")
+        data = await fetch_service_tags("https://download.microsoft.com/fake.json")
         assert data["changeNumber"] == 200
         assert len(data["values"]) == 1
+
+
+def test_validate_download_url_valid():
+    url = "https://download.microsoft.com/download/abc/ServiceTags_Public_123.json"
+    assert _validate_download_url(url) == url
+
+
+def test_validate_download_url_wrong_host():
+    with pytest.raises(ValueError, match="Unexpected download host"):
+        _validate_download_url("https://evil.com/download/ServiceTags_Public_123.json")
+
+
+def test_validate_download_url_http_scheme():
+    with pytest.raises(ValueError, match="Expected HTTPS"):
+        _validate_download_url("http://download.microsoft.com/download/abc.json")

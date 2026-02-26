@@ -67,6 +67,18 @@ async def test_health(app, preloaded_cache):
 
 
 @pytest.mark.asyncio
+async def test_health_has_security_headers(app, preloaded_cache):
+    with patch("app.main.cache", preloaded_cache):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/health")
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert response.headers["x-frame-options"] == "DENY"
+            assert response.headers["referrer-policy"] == "no-referrer"
+            assert "strict-transport-security" in response.headers
+
+
+@pytest.mark.asyncio
 async def test_tags(app, preloaded_cache):
     with patch("app.main.cache", preloaded_cache):
         transport = ASGITransport(app=app)
@@ -113,6 +125,40 @@ async def test_feed_not_found(app, preloaded_cache):
 
 
 @pytest.mark.asyncio
+async def test_feed_invalid_tag_rejected(app, preloaded_cache):
+    """Path traversal and invalid characters return 404."""
+    with patch("app.main.cache", preloaded_cache):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/feeds/../../etc/passwd")
+            assert response.status_code == 404
+            assert "passwd" not in response.json().get("detail", "")
+
+
+@pytest.mark.asyncio
+async def test_feed_with_token_auth(app, preloaded_cache):
+    """When API_TOKEN is set, requests without valid token are rejected."""
+    with (
+        patch("app.main.cache", preloaded_cache),
+        patch("app.main.settings") as mock_settings,
+    ):
+        mock_settings.api_token = "test-secret"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # No token — forbidden
+            response = await client.get("/feeds/AzureCloud")
+            assert response.status_code == 403
+
+            # Wrong token — forbidden
+            response = await client.get("/feeds/AzureCloud?token=wrong")
+            assert response.status_code == 403
+
+            # Correct token — success
+            response = await client.get("/feeds/AzureCloud?token=test-secret")
+            assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_index_page(app, preloaded_cache):
     with patch("app.main.cache", preloaded_cache):
         transport = ASGITransport(app=app)
@@ -120,3 +166,14 @@ async def test_index_page(app, preloaded_cache):
             response = await client.get("/")
             assert response.status_code == 200
             assert "AzureCloud" in response.text
+
+
+@pytest.mark.asyncio
+async def test_swagger_ui_disabled(app, preloaded_cache):
+    """Swagger/OpenAPI endpoints are disabled in production."""
+    with patch("app.main.cache", preloaded_cache):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            assert (await client.get("/docs")).status_code == 404
+            assert (await client.get("/redoc")).status_code == 404
+            assert (await client.get("/openapi.json")).status_code == 404

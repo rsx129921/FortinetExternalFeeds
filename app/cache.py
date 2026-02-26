@@ -9,13 +9,15 @@ class FeedCache:
         self.last_refresh: datetime | None = None
 
     def load(self, data: dict) -> None:
-        self.change_number = data["changeNumber"]
-        self.last_refresh = datetime.now(timezone.utc)
-        self._tags = {}
+        new_tags: dict[str, list[str]] = {}
         for entry in data.get("values", []):
             name = entry["name"]
             prefixes = entry.get("properties", {}).get("addressPrefixes", [])
-            self._tags[name] = prefixes
+            new_tags[name] = prefixes
+        # Atomic swap — prevents torn reads during concurrent access
+        self._tags = new_tags
+        self.change_number = data["changeNumber"]
+        self.last_refresh = datetime.now(timezone.utc)
 
     def get_all_tags(self) -> list[str]:
         return sorted(self._tags.keys())
